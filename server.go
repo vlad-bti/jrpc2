@@ -30,6 +30,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 )
@@ -102,33 +103,42 @@ type ResponseObject struct {
 	Id      interface{}  `json:"id"`
 }
 
-// Params defines methods for processing request parameters.
-type Params interface {
-	FromPositional([]interface{}) error
-}
+type Params interface{}
 
 // ParseParams processes the params data structure from the request.
 // Named parameters will be umarshaled into the provided Params inteface.
-// Positional arguments will be passed to Params interface's FromPositional method for
-// extraction.
 func ParseParams(params json.RawMessage, p Params) *ErrorObject {
 	if err := json.Unmarshal(params, p); err != nil {
-		errObj := &ErrorObject{
+		return &ErrorObject{
 			Code:    InvalidParamsCode,
 			Message: InvalidParamsMsg,
-		}
-		posParams := make([]interface{}, 0)
-		if err = json.Unmarshal(params, &posParams); err != nil {
-			errObj.Data = err.Error()
-			return errObj
-		}
-
-		if err = p.FromPositional(posParams); err != nil {
-			errObj.Data = err.Error()
-			return errObj
+			Data:    err.Error(),
 		}
 	}
-
+	// TODO redo validation for required fields
+	res := make(map[string]interface{}, 0)
+	if err := json.Unmarshal(params, &res); err != nil {
+		return &ErrorObject{
+			Code:    InvalidParamsCode,
+			Message: InvalidParamsMsg,
+			Data:    err.Error(),
+		}
+	}
+	fields := reflect.ValueOf(p).Elem()
+	for i := 0; i < fields.NumField(); i++ {
+		tags := fields.Type().Field(i).Tag.Get("binding")
+		if !strings.Contains(tags, "required") {
+			continue
+		}
+		fieldName := fields.Type().Field(i).Tag.Get("json")
+		if _, ok := res[fieldName]; !ok {
+			return &ErrorObject{
+				Code:    InvalidParamsCode,
+				Message: InvalidParamsMsg,
+				Data:    fmt.Sprintf("required field \"%s\" is missing", fields.Type().Field(i).Name),
+			}
+		}
+	}
 	return nil
 }
 
