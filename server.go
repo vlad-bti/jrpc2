@@ -206,6 +206,7 @@ type Server struct {
 	Route   string
 	Methods map[string]MethodWithContext
 	Headers map[string]string
+	srv     *http.Server
 }
 
 // rpcHandler handles incoming rpc client requests.
@@ -478,7 +479,10 @@ func (s *Server) Start() {
 
 func (s *Server) start() {
 	log.Println(fmt.Sprintf("Starting server on %s at %s", s.Host, s.Route))
-	log.Fatal(http.ListenAndServe(s.Host, nil))
+	if err := s.srv.ListenAndServe(); err != http.ErrServerClosed {
+		// unexpected error. port in use?
+		log.Fatalf("ListenAndServe(): %v", err)
+	}
 }
 
 // Start binds the rpcHandler to the server route and starts the https server.
@@ -489,7 +493,10 @@ func (s *Server) StartTLS(certFile, keyFile string) {
 
 func (s *Server) startTLS(certFile, keyFile string) {
 	log.Println(fmt.Sprintf("Starting server on %s at %s", s.Host, s.Route))
-	log.Fatal(http.ListenAndServeTLS(s.Host, certFile, keyFile, nil))
+	if err := s.srv.ListenAndServeTLS(certFile, keyFile); err != http.ErrServerClosed {
+		// unexpected error. port in use?
+		log.Fatalf("ListenAndServeTLS(): %v", err)
+	}
 }
 
 // StartWithMiddleware binds the rpcHandler, with its middleware to the server
@@ -506,6 +513,10 @@ func (s *Server) StartTLSWithMiddleware(certFile, keyFile string, m func(next ht
 	s.startTLS(certFile, keyFile)
 }
 
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.srv.Shutdown(ctx)
+}
+
 // NewServer creates a new server instance.
 func NewServer(host, route string, headers map[string]string) *Server {
 	s := &Server{
@@ -513,6 +524,7 @@ func NewServer(host, route string, headers map[string]string) *Server {
 		Route:   route,
 		Methods: make(map[string]MethodWithContext),
 		Headers: headers,
+		srv:     &http.Server{Addr: host},
 	}
 
 	s.Methods["jrpc2.register"] = MethodWithContext{Method: s.RegisterRPC}
@@ -551,6 +563,7 @@ type MuxServer struct {
 	Host     string
 	Headers  map[string]string
 	Handlers map[string]*MuxHandler
+	srv      *http.Server
 }
 
 // Start Starts binds all server rpcHandlers to their handler routes and
@@ -565,7 +578,10 @@ func (s *MuxServer) Start() {
 		log.Println(fmt.Sprintf("adding handler at %s", route))
 	}
 	log.Println(fmt.Sprintf("Starting server on %s", s.Host))
-	log.Fatal(http.ListenAndServe(s.Host, nil))
+	if err := s.srv.ListenAndServe(); err != http.ErrServerClosed {
+		// unexpected error. port in use?
+		log.Fatalf("ListenAndServe(): %v", err)
+	}
 }
 
 // Start Starts binds all server rpcHandlers to their handler routes and
@@ -580,7 +596,10 @@ func (s *MuxServer) StartTLS(certFile, keyFile string) {
 		log.Println(fmt.Sprintf("adding handler at %s", route))
 	}
 	log.Println(fmt.Sprintf("Starting server on %s", s.Host))
-	log.Fatal(http.ListenAndServeTLS(s.Host, certFile, keyFile, nil))
+	if err := s.srv.ListenAndServeTLS(certFile, keyFile); err != http.ErrServerClosed {
+		// unexpected error. port in use?
+		log.Fatalf("ListenAndServeTLS(): %v", err)
+	}
 }
 
 // AddHandler add the handler to the mux handlers.
@@ -588,7 +607,11 @@ func (s *MuxServer) AddHandler(route string, handler *MuxHandler) {
 	s.Handlers[route] = handler
 }
 
+func (s *MuxServer) Shutdown(ctx context.Context) error {
+	return s.srv.Shutdown(ctx)
+}
+
 // NewMuxServer creates a new mux handler instance.
 func NewMuxServer(host string, headers map[string]string) *MuxServer {
-	return &MuxServer{host, headers, make(map[string]*MuxHandler)}
+	return &MuxServer{host, headers, make(map[string]*MuxHandler), &http.Server{Addr: host}}
 }
